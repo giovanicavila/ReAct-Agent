@@ -1,324 +1,324 @@
-# ReAct Agent + OpenCode
+# ReAct Agent
 
-A TypeScript ReAct agent using the **Vercel AI SDK**, running inside **OpenCode**, with specialized tools for search, web browsing, and document reading.
+A TypeScript ReAct agent using the **Vercel AI SDK** with tools for web search, browsing, document reading, and AWS cost estimation. Runs as an interactive CLI or an HTTP server.
 
-OpenCode provides the agent environment (session, context, workspace, models), while the Vercel AI SDK runs the ReAct loop and tool calling.
-
----
-
-## Architecture Overview
+## Architecture
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│ OpenCode                                                     │
-│                                                               │
-│ • Interactive session                                         │
-│ • Persistent workspace context                                │
-│ • AGENTS.md awareness                                         │
-│ • Native model access                                         │
-│ • Local agent execution                                       │
-│                                                               │
-│  ┌───────────────────────────────────────────────────────┐    │
-│  │ ReAct Agent (Vercel AI SDK)                           │    │
-│  │                                                       │    │
-│  │ Thought → Action → Observe → Thought → Final Answer  │    │
-│  │                                                       │    │
-│  │  ┌──────────┐ ┌──────────┐ ┌────────────────────┐     │    │
-│  │  │ search   │ │ browse   │ │ read_document      │     │    │
-│  │  │ Tavily   │ │Playwright│ │ fetch + parsers    │     │    │
-│  │  └──────────┘ └──────────┘ └────────────────────┘     │    │
-│  └───────────────────────────────────────────────────────┘    │
-│                                                               │
-│                       OpenCode Models                         │
-│                                                               │
-│             Claude / Gemini / Qwen / Kimi / etc              │
-└───────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                         Entry Point                          │
+│                                                              │
+│  src/index.ts                                                 │
+│    ├── --server flag? → src/server.ts (HTTP API)             │
+│    └── default         → CLI chat loop                        │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │ ReAct Loop (Vercel AI SDK generateText)              │    │
+│  │                                                      │    │
+│  │  Thought → Action → Observation → Thought → Answer  │    │
+│  │                                                      │    │
+│  │  Tools:                                               │    │
+│  │   ┌──────────┐ ┌──────────┐ ┌──────────────┐       │    │
+│  │   │ search   │ │ browse   │ │read_document  │       │    │
+│  │   │ Tavily   │ │Playwright│ │ fetch+parse   │       │    │
+│  │   └──────────┘ └──────────┘ └──────────────┘       │    │
+│  │   ┌──────────────────┐                              │    │
+│  │   │ aws_calculator   │ ← Playwright-based          │    │
+│  │   │ AWS Pricing Calc │                              │    │
+│  │   └──────────────────┘                              │    │
+│  └──────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Layer Responsibilities
-
-| Layer | Responsibility |
-|-------|---------------|
-| OpenCode | Agent environment, context, AGENTS.md, interactive session |
-| Vercel AI SDK | ReAct loop, tool calling, orchestration |
-| Search Tool | Structured web search |
-| Browse Tool | JavaScript-rendered page navigation |
-| Read Document Tool | PDF, JSON, CSV, HTML reading |
-| Model | Reasoning and decision-making |
-
----
-
-## Execution Flow
-
-```
-User
-   │
-   ▼
-OpenCode
-   │
-   ▼
-ReAct Agent
-   │
-   ▼
-Model
-   │
-   ├─ Needs to search?
-   │      └─ search()
-   │
-   ├─ Needs to open a page?
-   │      └─ browse()
-   │
-   ├─ Needs to read a document?
-   │      └─ read_document()
-   │
-   ▼
-Final Answer
-```
-
----
 
 ## Project Structure
 
 ```
-react-agent/
-│
-├── src/
-│   ├── index.ts
-│   │
-│   └── tools/
-│       ├── search.ts
-│       ├── browser.ts
-│       └── document.ts
-│
-├── prompts/
-│   └── system.ts
-│
-├── AGENTS.md
-├── package.json
-├── tsconfig.json
-└── .env
+src/
+├── index.ts                 # CLI entry — ReAct loop + chat UI
+├── server.ts                # HTTP server — POST /api/estimate
+├── tools/
+│   ├── search.ts            # Web search via Tavily
+│   ├── browser.ts           # Playwright page renderer
+│   ├── document.ts          # Fetch-based document reader
+│   └── aws-calculator.ts    # AWS Pricing Calculator automation
+prompts/
+└── system.ts                # System prompt for the agent
+AGENTS.md                    # OpenCode agent instructions
+.env                         # Environment variables
+package.json
+tsconfig.json
 ```
 
----
+## Requirements
 
-## Dependencies
+- Node.js 20+
+- [Tavily API key](https://tavily.com) (free tier available)
+- OpenAI API key (or OpenRouter for any model)
 
-### Install
+## Setup
 
 ```bash
+git clone <repo>
+cd react-agent
 npm install
-```
-
-### Browser
-
-```bash
 npx playwright install chromium
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
----
-
-## Environment Variables
+### Environment Variables
 
 ```env
+# ── LLM Provider ──────────────────────────────────
+OPENAI_API_KEY=sk-...          # OpenAI
+# or OpenRouter:
+# OPENAI_API_KEY=sk-or-v1-...
+# OPENAI_BASE_URL=https://openrouter.ai/api/v1
+
+# ── Search ────────────────────────────────────────
 TAVILY_API_KEY=tvly-xxxx
-MAX_STEPS=10
+
+# ── Optional ──────────────────────────────────────
+MODEL=gpt-4o-mini               # Model name
+MAX_STEPS=5                     # Max ReAct iterations
+MAX_TOKENS=1024                 # Max tokens per response
+PORT=3000                       # Server port (default 3000)
 ```
 
----
+## Usage
 
-## Tools
+### CLI mode (interactive chat)
 
-### 1. Search — Web search via Tavily
+```bash
+# Development (watch mode)
+npm run dev
 
-Allows the agent to retrieve up-to-date information from the web.
+# Production
+npm start
+```
 
-Ideal for:
-- Documentation
-- Changelogs
-- News
-- APIs
-- General research
+Type your questions and watch the agent reason step by step, calling tools as needed.
 
-```ts
+### Server mode (HTTP API)
+
+```bash
+# Development (watch mode)
+npm run server:dev
+
+# Production
+npm run server
+```
+
+#### POST /api/estimate
+
+Creates an AWS cost estimate from an architecture description.
+
+**Request** — accepts text descriptions or structured JSON:
+
+```json
+{ "architecture": "I need a web app with EC2, RDS PostgreSQL, and S3 behind a load balancer" }
+```
+
+```json
+{ "architecture": { "app": "EC2", "db": "RDS", "storage": "S3" } }
+```
+
+```json
+{ "services": [{ "serviceName": "Amazon EC2", "quantity": 2 }] }
+```
+
+```json
+{
+  "services": [
+    { "serviceName": "Amazon EC2", "quantity": 2, "description": "Web servers" },
+    { "serviceName": "Amazon RDS for PostgreSQL", "quantity": 1 }
+  ]
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "url": "https://calculator.aws/#/estimate?id=c28f1a2b...",
+  "title": "Architecture Estimate",
+  "region": "US East (Ohio)",
+  "services": ["Amazon EC2", "Amazon RDS for PostgreSQL"],
+  "message": "Estimate \"Architecture Estimate\" created with 2 service(s) in US East (Ohio)."
+}
+```
+
+#### GET /health
+
+```json
+{ "status": "ok" }
+```
+
+## Deploy
+
+### Node.js (any host)
+
+```bash
+npm ci --production
+npx playwright install chromium
+npm run server
+```
+
+The server listens on `$PORT` (default 3000).
+
+### Docker
+
+```dockerfile
+FROM node:22-slim
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci && npx playwright install chromium
+COPY . .
+EXPOSE 3000
+CMD ["node", "--import", "tsx", "src/server.ts"]
+```
+
+### Fly.io / Railway / Render
+
+Set the start command to `npm run server`, set your environment variables, and ensure the build step runs `npx playwright install chromium`.
+
+## How It Works
+
+### ReAct Loop
+
+The agent follows the **Reasoning + Acting** pattern:
+
+```
+Thought: I need to look up the latest pricing for EC2
+Action: search("AWS EC2 pricing 2026")
+Observation: [search results]
+Thought: Now I can create the estimate
+Action: aws_calculator({ services: ["Amazon EC2"] })
+Observation: [estimate URL]
+Answer: Here is the estimate...
+```
+
+### Tool Execution
+
+Each tool wraps a concrete action:
+
+| Tool | Mechanism | Use Case |
+|------|-----------|----------|
+| `search` | Tavily API | Factual questions, news, docs |
+| `browse` | Playwright Chromium | JS-rendered pages, SPAs |
+| `read_document` | HTTP fetch + parsers | PDFs, JSON, CSV, static HTML |
+| `aws_calculator` | Playwright Chromium | AWS cost estimation |
+
+### AWS Calculator Flow
+
+1. Launch headless Chromium via Playwright
+2. Navigate to `https://calculator.aws/#/estimate`
+3. Dismiss cookie banner and chatbot overlay
+4. Click "Add service", find the service by `data-cy` attribute
+5. Click "Configure", fill quantity, save
+6. Click "Share" → "Agree and continue" → extract shareable URL
+7. Return the URL with the estimate ID
+
+## Adding a New Tool (e.g. `azure_calculator`)
+
+### 1. Create the tool file
+
+```typescript
+// src/tools/azure-calculator.ts
 import { tool } from "ai";
 import { z } from "zod";
 
-export const searchTool = tool({
-  description:
-    "Search the web for information and return relevant results.",
-
+export const azureCalculatorTool = tool({
+  description: `Navigate the Azure Pricing Calculator and return a shareable estimate URL.`,
   parameters: z.object({
-    query: z.string(),
-    max_results: z.number().default(5),
+    services: z
+      .array(
+        z.object({
+          serviceName: z.string().describe("Full Azure service name e.g. 'Virtual Machines'"),
+          quantity: z.number().optional().default(1),
+          description: z.string().optional(),
+        })
+      )
+      .min(1),
+    region: z.string().optional().default("East US"),
+    title: z.string().optional().default("Architecture Estimate"),
   }),
-
-  execute: async ({ query, max_results }) => {
-    // Tavily call
+  execute: async ({ services, region, title }) => {
+    // Your Playwright automation here
+    return {
+      success: true,
+      url: "https://...",
+      services: services.map(s => s.serviceName),
+      message: `Estimate created.`,
+    };
   },
 });
 ```
 
-**When to use:** factual questions, news, documentation, quick research
+### 2. Register in the CLI agent
 
-**When NOT to use:** specific URLs, PDFs, JavaScript applications
+```typescript
+// src/index.ts
+import { azureCalculatorTool } from "./tools/azure-calculator.js";
 
----
-
-### 2. Browse — Playwright browser navigation
-
-Opens real pages and renders JavaScript.
-
-Many modern sites return empty HTML on a plain fetch.
-
-Examples: Notion, Vercel, GitHub, Dashboards, React/Vue apps
-
-```ts
-export const browseTool = tool({
-  description:
-    "Open and extract content from web pages.",
-
-  parameters: z.object({
-    url: z.string(),
-    selector: z.string().optional(),
-  }),
-
-  execute: async ({ url, selector }) => {
-    // Playwright
-  },
-});
-```
-
-**Internal flow:**
-1. Launch Chromium
-2. Navigate to URL
-3. Wait for render
-4. Clean up useless elements
-5. Extract text
-6. Return content
-
-**When to use:** blogs, React/Vue sites, SPAs, dashboards
-
-**When NOT to use:** JSON APIs, PDFs, CSV files
-
----
-
-### 3. Read Document — Fetch-based document reading
-
-Reads files directly without a browser. Faster than Playwright.
-
-Supported types: JSON, CSV, TXT, HTML, PDF
-
-```ts
-export const readDocumentTool = tool({
-  description:
-    "Read documents and extract content.",
-
-  parameters: z.object({
-    url: z.string(),
-    max_chars: z.number().default(6000),
-  }),
-
-  execute: async ({ url }) => {
-    // fetch
-  },
-});
-```
-
-**When to use:** PDFs, JSON, CSV, TXT, static HTML
-
-**When NOT to use:** React/Angular apps, SPAs
-
----
-
-## Tool Registration
-
-```ts
 const tools = {
   search: searchTool,
   browse: browseTool,
   read_document: readDocumentTool,
+  aws_calculator: awsCalculatorTool,
+  azure_calculator: azureCalculatorTool,  // ← add here
 };
 ```
 
----
+### 3. Register in the server
 
-## ReAct Agent Configuration
+```typescript
+// src/server.ts
+import { azureCalculatorTool } from "./tools/azure-calculator.js";
 
-```ts
-const result = await generateText({
-  model,
-  system,
-  messages,
-  tools,
-  maxSteps: 10,
-});
+const tools = {
+  search: searchTool,
+  aws_calculator: awsCalculatorTool,
+  azure_calculator: azureCalculatorTool,  // ← add here
+};
 ```
 
----
+### 4. Update the system prompt
 
-## How the ReAct Loop Works
-
-ReAct = **Reasoning + Acting**
-
-The agent alternates between:
-
-```
-Thought
-↓
-Action
-↓
-Observation
-↓
-Thought
-↓
-Action
-↓
-Observation
-↓
-Final Answer
+```typescript
+// prompts/system.ts
+// Add the tool description to the system prompt
+- **azure_calculator**: navigate the Azure Pricing Calculator...
 ```
 
-### Example
+### 5. Update AGENTS.md
 
-**User:** What's the main new feature in Next.js 15?
+Document the tool so OpenCode knows when to use it.
 
-```
-Thought: I need to find the latest release.
-Action: search("Next.js 15 release notes")
-Observation: Results found.
-Thought: I need to open the official page.
-Action: browse("https://nextjs.org/blog/next-15")
-Observation: Content extracted.
-Final Answer: Release summary.
-```
+### 6. (Optional) Add a server endpoint
 
----
+If the tool needs a dedicated API endpoint (like `/api/estimate` for AWS):
 
-## Possible Future Tools
-
-- **run_code** — execute JavaScript in isolation
-- **database_query** — query PostgreSQL
-- **github_tool** — read repositories, PRs, commits
-- **vector_search** — semantic search on private documents (RAG)
-
----
-
-## Summary
-
-```
-OpenCode
-    │
-    ▼
-Vercel AI SDK
-    │
-    ├── search (Tavily)
-    ├── browse (Playwright)
-    └── read_document
-    │
-    ▼
-OpenCode Model
+```typescript
+// src/server.ts
+if (req.method === "POST" && req.url === "/api/azure-estimate") {
+  // handle Azure estimate request
+}
 ```
 
-OpenCode provides the agent environment. The Vercel AI SDK implements the ReAct loop. The tools execute real actions. The model decides which tool to use, interprets the results, and produces the final answer.
+## Configuration Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_API_KEY` | — | OpenAI or OpenRouter API key |
+| `OPENAI_BASE_URL` | — | Custom base URL (for OpenRouter etc.) |
+| `TAVILY_API_KEY` | — | Tavily search API key |
+| `MODEL` | `gpt-4o-mini` | Model name |
+| `MAX_STEPS` | `5` | Maximum ReAct iterations |
+| `MAX_TOKENS` | `1024` | Max response tokens |
+| `PORT` | `3000` | HTTP server port |
+
+## License
+
+MIT

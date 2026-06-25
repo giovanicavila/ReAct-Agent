@@ -25,11 +25,44 @@ Open a URL in a real browser and return its text content. Use for JS-rendered pa
 
 Extract structured text from a document URL (PDF, HTML page, plain text, CSV, JSON). Use when you need to read the full content of a specific document.
 
+### aws_calculator
+
+Navigate the AWS Pricing Calculator, add the specified services, and return a shareable estimate URL. Use this to create cost estimates for AWS architectures. Pass services with their full official names (e.g. "Amazon EC2", "Amazon S3", "AWS Lambda").
+
+## API Server
+
+The project includes an HTTP server for creating estimates programmatically.
+
+```bash
+npm run server        # Start API server (production)
+npm run server:dev    # Start API server (watch mode)
+```
+
+### POST /api/estimate
+
+Accepts an architecture description (text or JSON) and returns the calculator link.
+
+**Request examples:**
+
+```json
+{ "architecture": "I need a web app with EC2, RDS PostgreSQL, and S3 behind a load balancer" }
+```
+
+```json
+{ "architecture": { "app": "EC2", "db": "RDS", "storage": "S3" } }
+```
+
+```json
+{ "services": [{ "serviceName": "Amazon EC2", "quantity": 2 }] }
+```
+
 ## Commands
 
 ```bash
-npm run dev
-npm start
+npm run dev                 # CLI agent (watch mode)
+npm start                   # CLI agent
+npm run server              # API server (production)
+npm run server:dev          # API server (watch mode)
 npx playwright install chromium
 ```
 

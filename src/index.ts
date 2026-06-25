@@ -2,11 +2,16 @@ import "dotenv/config";
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
+
+const provider = process.env.OPENAI_BASE_URL
+  ? createOpenAI({ baseURL: process.env.OPENAI_BASE_URL })
+  : createOpenAI();
 
 import { searchTool } from "./tools/search.js";
 import { browseTool } from "./tools/browser.js";
 import { readDocumentTool } from "./tools/document.js";
+import { awsCalculatorTool } from "./tools/aws-calculator.js";
 import { SYSTEM_PROMPT } from "../prompts/system.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -16,12 +21,15 @@ type Message = { role: "user" | "assistant"; content: string };
 // ── Agent config ─────────────────────────────────────────────────────────────
 
 const MODEL = process.env.MODEL ?? "gpt-4o-mini";
-const MAX_STEPS = Number(process.env.MAX_STEPS ?? 10);
+const MAX_STEPS = Number(process.env.MAX_STEPS ?? 5);
+
+const model = provider(MODEL);
 
 const tools = {
   search: searchTool,
   browse: browseTool,
   read_document: readDocumentTool,
+  aws_calculator: awsCalculatorTool,
 };
 
 // ── Core: single agent turn ───────────────────────────────────────────────────
@@ -36,11 +44,12 @@ async function runAgent(
   ];
 
   const result = await generateText({
-    model: openai(MODEL),
+    model,
     system: SYSTEM_PROMPT,
     messages,
     tools,
-    maxSteps: MAX_STEPS, // Vercel AI SDK handles the ReAct loop for us
+    maxSteps: MAX_STEPS,
+    maxTokens: Number(process.env.MAX_TOKENS ?? 1024),
     onStepFinish({ stepType, toolCalls, toolResults, text }) {
       // Pretty-print each step so you can watch the reasoning
       if (stepType === "tool-result") {
@@ -94,4 +103,10 @@ async function main() {
   rl.close();
 }
 
-main();
+if (process.argv.includes("--server")) {
+  // Start HTTP server instead of CLI
+  const { main: serverMain } = await import("./server.js");
+  serverMain();
+} else {
+  main();
+}

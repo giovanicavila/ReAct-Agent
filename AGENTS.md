@@ -40,21 +40,37 @@ npm run server:dev    # Start API server (watch mode)
 
 ### POST /api/estimate
 
-Accepts an architecture description (text or JSON) and returns the calculator link.
+Accepts an architecture description (text, JSON, or PDF) and returns the calculator link.
 
-**Request examples:**
+**Request formats:**
 
-```json
-{ "architecture": "I need a web app with EC2, RDS PostgreSQL, and S3 behind a load balancer" }
-```
+1. **JSON** — architecture description or explicit services list:
 
-```json
-{ "architecture": { "app": "EC2", "db": "RDS", "storage": "S3" } }
-```
+    ```json
+    { "architecture": "I need a web app with EC2, RDS PostgreSQL, and S3 behind a load balancer" }
+    ```
 
-```json
-{ "services": [{ "serviceName": "Amazon EC2", "quantity": 2 }] }
-```
+    ```json
+    { "architecture": { "app": "EC2", "db": "RDS", "storage": "S3" } }
+    ```
+
+    ```json
+    { "services": [{ "serviceName": "Amazon EC2", "quantity": 2 }] }
+    ```
+
+2. **PDF upload (multipart/form-data)** — upload a PDF file containing the architecture description:
+
+    ```bash
+    curl -F "file=@architecture.pdf" http://localhost:3000/api/estimate
+    ```
+
+3. **PDF upload (raw)** — send PDF bytes directly:
+
+    ```bash
+    curl -X POST --data-binary @architecture.pdf -H "Content-Type: application/pdf" http://localhost:3000/api/estimate
+    ```
+
+For PDF uploads, the server extracts the text using `pdf-parse` and passes it to the agent, which reasons about the required AWS services and calls `aws_calculator` to create the estimate.
 
 ## Commands
 

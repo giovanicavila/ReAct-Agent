@@ -6,14 +6,18 @@ const CALCULATOR_URL = "https://calculator.aws/#/estimate";
 
 async function getBrowser() {
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+  });
   const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    viewport: { width: 1280, height: 900 },
     permissions: ["clipboard-read", "clipboard-write"],
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(15_000);
+  page.setDefaultTimeout(30_000);
   return { browser, page };
 }
 
@@ -35,6 +39,75 @@ async function dismissOverlays(page: Page) {
   }).catch(() => {});
 }
 
+// Mapping from common/abbreviated names → actual data-cy attribute on the calculator page
+const SERVICE_NAME_MAP: Record<string, string> = {
+  "Amazon S3": "Amazon Simple Storage Service (S3)",
+  "Amazon SQS": "Amazon Simple Queue Service (SQS)",
+  "Amazon SNS": "Amazon Simple Notification Service (SNS)",
+  "Amazon ECR": "Amazon Elastic Container Registry",
+  "Amazon ECS": "Amazon EKS",
+  "AWS WAF": "AWS Web Application Firewall (WAF)",
+  "Application Load Balancer": "Elastic Load Balancing",
+  "ALB": "Elastic Load Balancing",
+  "Elastic Load Balancer": "Elastic Load Balancing",
+  "NAT Gateway": "Amazon Virtual Private Cloud (VPC)",
+  "VPC": "Amazon Virtual Private Cloud (VPC)",
+  "AWS Certificate Manager": "AWS Certificate Manager (ACM)",
+  "Amazon RDS": "Amazon RDS for PostgreSQL",
+  "Amazon Aurora": "Amazon Aurora PostgreSQL-Compatible DB",
+  "Amazon Aurora PostgreSQL": "Amazon Aurora PostgreSQL-Compatible DB",
+  "Amazon KMS": "AWS Key Management Service",
+  "AWS KMS": "AWS Key Management Service",
+  "AWS Secrets Manager": "AWS Secrets Manager",
+  "Amazon DynamoDB": "Amazon DynamoDB",
+  "Amazon Route 53": "Amazon Route 53",
+  "Amazon CloudFront": "Amazon CloudFront",
+  "Amazon CloudWatch": "Amazon CloudWatch",
+  "Amazon GuardDuty": "Amazon GuardDuty",
+  "Amazon ElastiCache": "Amazon ElastiCache",
+  "Amazon ElastiCache for Redis": "Amazon ElastiCache",
+  "Amazon OpenSearch Service": "Amazon OpenSearch Service",
+  "Amazon Cognito": "Amazon Cognito",
+  "Amazon EventBridge": "Amazon EventBridge",
+  "Amazon API Gateway": "Amazon API Gateway",
+  "Amazon Detective": "Amazon Detective",
+  "Amazon Inspector": "Amazon Inspector",
+  "Amazon Macie": "Amazon Macie",
+  "Amazon DocumentDB": "Amazon DocumentDB (with MongoDB compatibility)",
+  "AWS Shield": "AWS Shield",
+  "AWS X-Ray": "AWS X-Ray",
+  "AWS Lambda": "AWS Lambda",
+  "AWS Config": "AWS Config",
+  "AWS CloudTrail": "AWS CloudTrail",
+  "AWS CloudFormation": "AWS CloudFormation",
+  "AWS CodePipeline": "AWS CodePipeline",
+  "AWS CodeBuild": "AWS CodeBuild",
+  "AWS CodeDeploy": "AWS CodeDeploy",
+  "AWS Backup": "AWS Backup",
+  "AWS Systems Manager": "AWS Systems Manager",
+  "AWS Database Migration Service": "AWS Database Migration Service",
+  "AWS DMS": "AWS Database Migration Service",
+  "AWS Security Hub": "AWS Security Hub",
+  "AWS Fargate": "AWS Fargate",
+  "Amazon EKS": "Amazon EKS",
+  "Amazon EC2": "Amazon EC2",
+  "Amazon EBS": "Amazon Elastic Block Store (EBS)",
+  "Amazon Elastic Block Store": "Amazon Elastic Block Store (EBS)",
+  "Amazon EFS": "Amazon Elastic File System (EFS)",
+  "Amazon Elastic File System": "Amazon Elastic File System (EFS)",
+  "Amazon VPC": "Amazon Virtual Private Cloud (VPC)",
+  "Amazon Virtual Private Cloud (VPC)": "Amazon Virtual Private Cloud (VPC)",
+  "Amazon Elastic Kubernetes Service (EKS)": "Amazon EKS",
+  "Amazon Elastic Container Registry (ECR)": "Amazon Elastic Container Registry",
+  "Application Load Balancer (ALB)": "Elastic Load Balancing",
+  "AWS Key Management Service (KMS)": "AWS Key Management Service",
+  "AWS Database Migration Service (DMS)": "AWS Database Migration Service",
+  "AWS NAT Gateway": "Amazon Virtual Private Cloud (VPC)",
+  "AWS Migration Hub": "AWS Migration Hub Refactor Spaces",
+  "AWS Auto Scaling": "Amazon EC2 Auto Scaling",
+  "AWS IAM": "AWS IAM Access Analyzer",
+};
+
 async function addService(
   page: Page,
   serviceName: string,
@@ -51,39 +124,44 @@ async function addService(
       return false;
     }
     await addSvcBtn.click();
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1000);
     await dismissOverlays(page);
   }
 
   // Step 2: Find the service card by matching its data-cy attribute.
-  // AWS Calculator uses `data-cy="${serviceName}-button"` or `data-cy="${serviceName} -button"`.
-  // Use in-browser evaluation for precise name matching (avoids substring collisions like
-  // "Amazon EC2" matching "Windows Server and SQL Server on Amazon EC2").
-  const clicked = await page.evaluate((svcName: string): boolean => {
+  // First, translate common/abbreviated names to actual calculator names
+  const mappedName = SERVICE_NAME_MAP[serviceName] || serviceName;
+  // Also try the exact service name as-is
+  const candidates = [mappedName, serviceName];
+
+  // Use in-browser evaluation for precise DOM matching
+  const clicked = await page.evaluate((namesToTry: string[]): boolean => {
     const candidates = document.querySelectorAll<HTMLElement>("[data-cy]");
-    for (const el of candidates) {
-      const cy = el.getAttribute("data-cy") || "";
-      // Extract the stored service name by stripping the "-button" suffix
-      const stored = cy.replace(/ -button$/, "").replace(/-button$/, "");
-      if (stored === svcName) {
-        const btn = el.querySelector("button");
-        if (btn) { btn.click(); return true; }
+    for (const svcName of namesToTry) {
+      for (const el of candidates) {
+        const cy = el.getAttribute("data-cy") || "";
+        // Extract the stored service name by stripping the "-button" suffix
+        const stored = cy.replace(/ -button$/, "").replace(/-button$/, "");
+        if (stored === svcName) {
+          const btn = el.querySelector("button");
+          if (btn) { btn.click(); return true; }
+        }
       }
-    }
-    // Fallback: try starts-with match (handles sub-services like "Amazon RDS for PostgreSQL")
-    for (const el of candidates) {
-      const cy = el.getAttribute("data-cy") || "";
-      const cleaned = cy.replace(/ -button$/, "").replace(/-button$/, "");
-      if (cleaned.startsWith(svcName + " ") || cleaned.startsWith(svcName)) {
-        const btn = el.querySelector("button");
-        if (btn) { btn.click(); return true; }
+      // Fallback: try starts-with match
+      for (const el of candidates) {
+        const cy = el.getAttribute("data-cy") || "";
+        const cleaned = cy.replace(/ -button$/, "").replace(/-button$/, "");
+        if (cleaned.startsWith(svcName + " ") || cleaned.startsWith(svcName)) {
+          const btn = el.querySelector("button");
+          if (btn) { btn.click(); return true; }
+        }
       }
     }
     return false;
-  }, serviceName);
+  }, candidates);
 
   if (!clicked) return false;
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(1000);
   await dismissOverlays(page);
 
   // Step 3: Fill config form
@@ -187,14 +265,12 @@ export const awsCalculatorTool = tool({
     try {
       // Navigate to the calculator
       await page.goto(CALCULATOR_URL, {
-        waitUntil: "networkidle",
+        waitUntil: "load",
         timeout: 60_000,
       });
-      await page.waitForTimeout(3000);
 
       // Dismiss cookie banner and chatbot widget
       await dismissOverlays(page);
-      await page.waitForTimeout(1000);
 
       // Set the region on the add service page if needed
       // (Each service config page also has a region selector)
@@ -208,218 +284,225 @@ export const awsCalculatorTool = tool({
       }
 
       const addedServices: string[] = [];
+      let atLeastOneAdded = false;
 
+      console.error(`[aws_calculator] Starting loop for ${services.length} services`);
       for (let idx = 0; idx < services.length; idx++) {
         const svc = services[idx];
-        const ok = await addService(
-          page,
-          svc.serviceName,
-          svc.quantity,
-          svc.description
-        );
 
-        if (!ok) {
-          // Try navigating directly to addService page and retry
-          await page.goto(`${CALCULATOR_URL}`, {
-            waitUntil: "networkidle",
-          });
-          await page.waitForTimeout(2000);
-          await dismissOverlays(page);
-          const retryOk = await addService(
-            page,
-            svc.serviceName,
-            svc.quantity,
-            svc.description
-          );
-          if (!retryOk) {
+        // Wrap each service in try/catch so one failure doesn't abort all
+        try {
+          // Click "Add service" if we're not on the addService page
+          if (!page.url().includes("/addService")) {
+            const addBtn = page.locator("button:has-text(\"Add service\")").first();
+            if (await addBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+              console.error(`[aws_calculator] service ${idx}: clicking "Add service" button`);
+              await addBtn.click();
+              await page.waitForTimeout(3000);
+            } else {
+              console.error(`[aws_calculator] service ${idx}: navigating to /addService`);
+              await page.goto("https://calculator.aws/#/addService", { waitUntil: "load", timeout: 30_000 });
+              await page.waitForTimeout(1500);
+            }
+            await dismissOverlays(page);
+          }
+
+          // Find and click the service card
+          const mappedName = SERVICE_NAME_MAP[svc.serviceName] || svc.serviceName;
+          console.error(`[aws_calculator] service ${idx}: trying "${svc.serviceName}" → mapped to "${mappedName}"`);
+          const found = await page.evaluate((svcName) => {
+            const els = document.querySelectorAll("[data-cy]");
+            for (let i = 0; i < els.length; i++) {
+              let cy = els[i].getAttribute("data-cy") || "";
+              cy = cy.replace(/ -button$/, "").replace(/-button$/, "").trim();
+              if (cy === svcName) {
+                const btn = els[i].querySelector("button");
+                if (btn) { btn.click(); return true; }
+              }
+            }
+            for (let i = 0; i < els.length; i++) {
+              let cy = els[i].getAttribute("data-cy") || "";
+              cy = cy.replace(/ -button$/, "").replace(/-button$/, "").trim();
+              if (cy.startsWith(svcName + " ") || cy.startsWith(svcName)) {
+                const btn = els[i].querySelector("button");
+                if (btn) { btn.click(); return true; }
+              }
+            }
+            for (let i = 0; i < els.length; i++) {
+              let cy = els[i].getAttribute("data-cy") || "";
+              cy = cy.replace(/ -button$/, "").replace(/-button$/, "").trim();
+              const text = els[i].textContent || "";
+              if (cy.includes(svcName) || svcName.includes(cy)) {
+                const btn = els[i].querySelector("button");
+                if (btn && btn.textContent === "Configure") { btn.click(); return true; }
+              }
+            }
+            return false;
+          }, mappedName);
+
+          if (!found) {
+            console.error(`[aws_calculator] service ${idx}: NOT FOUND on page`);
             addedServices.push(`${svc.serviceName} (FAILED - not found)`);
             continue;
           }
-        }
+          console.error(`[aws_calculator] service ${idx}: FOUND, clicking card`);
 
-        // Dismiss any cookie banner that appeared after navigating to the config page
-        await dismissOverlays(page);
-
-        // Scroll to the bottom so the save buttons are in view, then dismiss overlays
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await page.waitForTimeout(1000);
-        await dismissOverlays(page);
-
-        // Save the service (use last button instance — top buttons may have zero size)
-        const saveAndAdd = page
-          .locator("button:has-text(\"Save and add service\")")
-          .last();
-        const saveAndSummary = page
-          .locator("button:has-text(\"Save and view summary\")")
-          .last();
-
-        const isLast = idx === services.length - 1;
-
-        if (isLast) {
-          try {
-            await saveAndSummary.click({ timeout: 10000 });
-          } catch {
-            try {
-              await saveAndAdd.click({ timeout: 8000 });
-            } catch {
-              // neither button found
-            }
-          }
-        } else {
-          try {
-            await saveAndAdd.click({ timeout: 10000 });
-          } catch {
-            try {
-              await saveAndSummary.click({ timeout: 8000 });
-            } catch {
-              // neither button found
-            }
-          }
-        }
-
-        await page.waitForTimeout(3000);
-        addedServices.push(svc.serviceName);
-
-        // Navigate back to the main estimate page for the next service
-        if (!isLast) {
-          await page.goto(CALCULATOR_URL, {
-            waitUntil: "networkidle",
-            timeout: 30_000,
-          });
           await page.waitForTimeout(2000);
           await dismissOverlays(page);
+
+          // Fill description
+          if (svc.description) {
+            const desc = page.locator("input[aria-label*=\"escription\" i], input[placeholder*=\"escription\" i]").first();
+            if (await desc.isVisible({ timeout: 3000 }).catch(() => false)) {
+              await desc.fill(svc.description);
+            }
+          }
+
+          // Fill quantity
+          if (svc.quantity && svc.quantity > 0) {
+            const numInput = page.locator("input[type=\"text\"][inputmode=\"numeric\"]").first();
+            if (await numInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+              await numInput.fill(String(svc.quantity));
+            }
+          }
+
+          // Scroll to bottom and dismiss overlays
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+          await dismissOverlays(page);
+
+          // Click save button
+          const isLast = idx === services.length - 1;
+          console.error(`[aws_calculator] service ${idx}: trying to save (isLast=${isLast})`);
+          try {
+            if (isLast) {
+              await page.locator("button:has-text(\"Save and view summary\")").last().click({ timeout: 10000 });
+            } else {
+              await page.locator("button:has-text(\"Save and add service\")").last().click({ timeout: 10000 });
+            }
+            console.error(`[aws_calculator] service ${idx}: save clicked successfully`);
+          } catch {
+            console.error(`[aws_calculator] service ${idx}: save button not found, retrying with alternative`);
+            try {
+              await page.locator("button:has-text(\"Save and view summary\")").last().click({ timeout: 8000 });
+              console.error(`[aws_calculator] service ${idx}: alternative save worked`);
+            } catch {
+              console.error(`[aws_calculator] service ${idx}: ALL save buttons failed`);
+              addedServices.push(`${svc.serviceName} (FAILED - save)`);
+              continue;
+            }
+          }
+
+          await page.waitForTimeout(1500);
+          addedServices.push(svc.serviceName);
+          atLeastOneAdded = true;
+          console.error(`[aws_calculator] service ${idx}: ✅ added`);
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          console.error(`[aws_calculator] service ${idx}: EXCEPTION — ${errMsg.slice(0, 100)}`);
+          addedServices.push(`${svc.serviceName} (ERROR: ${errMsg.slice(0, 50)})`);
         }
       }
 
       // Capture current URL — "Save and view summary" may have already put an ID in it
       let shareableUrl = page.url();
 
-      // If the current URL doesn't have an ID yet, navigate to the main estimate page
-      // and try the Share flow to generate a public link
-      if (!shareableUrl.includes("id=")) {
-        await page.goto(CALCULATOR_URL, {
-          waitUntil: "networkidle",
-          timeout: 30_000,
-        });
-        await page.waitForTimeout(3000);
-        await dismissOverlays(page);
+      // If nothing was added, return early
+      if (!atLeastOneAdded) {
+        console.error(`[aws_calculator] No services were added. All ${services.length} failed.`);
+        return {
+          success: false,
+          url: shareableUrl,
+          title,
+          region,
+          services: addedServices,
+          message: "No services could be added to the estimate",
+        };
+      }
+      console.error(`[aws_calculator] ${addedServices.filter(s => !s.includes("FAILED") && !s.includes("ERROR")).length} services added successfully`);
 
+      // Navigate to the main estimate page for the share flow
+      console.error(`[aws_calculator] Navigating to estimate page for share flow`);
+      await page.goto(CALCULATOR_URL, {
+        waitUntil: "load",
+        timeout: 30_000,
+      }).catch(() => {});
+      await dismissOverlays(page);
+
+      shareableUrl = page.url();
+      console.error(`[aws_calculator] Post-navigation URL: ${shareableUrl.slice(0, 100)}`);
+
+      if (!shareableUrl.includes("id=")) {
+        console.error(`[aws_calculator] Attempting share flow`);
         const shareBtn = page.locator(
           "button[data-cy=\"save-and-share\"], button:has-text(\"Share\"), a:has-text(\"Share\"), [aria-label*=\"Share\"]"
         ).first();
         try {
           await shareBtn.click({ timeout: 10000 });
+          console.error(`[aws_calculator] Share button clicked`);
+          await page.waitForTimeout(2000);
 
-          // Wait for the share modal/dialog to appear
-          await page.waitForTimeout(3000);
-
-          // Step 1: Click "Agree and continue" (force to bypass chatbot overlay)
-          const agreeBtn = page.locator(
-            "button[data-id=\"agree-continue\"], button[aria-label*=\"Agree and continue\"], button:has-text(\"Agree and continue\")"
-          ).first();
+          // Click "Agree and continue"
           try {
-            await agreeBtn.click({ force: true, timeout: 8000 });
-            await page.waitForTimeout(3000);
-          } catch {
-            // Agree button not found or not clickable
+            await page.locator("button[data-id=\"agree-continue\"], button:has-text(\"Agree and continue\")").first().click({ force: true, timeout: 5000 });
+            await page.waitForTimeout(2000);
+          } catch {}
+
+          // Try to get URL from readonly input
+          const urlInp = page.locator("input[readonly]").first();
+          if (await urlInp.isVisible({ timeout: 3000 }).catch(() => false)) {
+            const val = await urlInp.inputValue();
+            if (val.includes("id=")) shareableUrl = val;
           }
 
-          // Step 2: After agreeing, the shareable URL input might already be visible
-          // Check for a readonly input containing a URL (common AWS pattern)
-          const urlInput = page.locator("input[readonly]").first();
-          if (
-            await urlInput.isVisible({ timeout: 3000 }).catch(() => false)
-          ) {
-            const val = await urlInput.inputValue();
-            if (val.includes("calculator.aws") || val.includes("id=")) {
-              shareableUrl = val;
-            }
-          }
-
-          // Step 3: Click "Copy public link" to generate/copy the URL
+          // Click copy public link
           if (!shareableUrl.includes("id=")) {
-            const copyBtn = page.locator(
-              "button.clipboard-button, button[aria-label*=\"Copy public link\"], button:has-text(\"Copy public link\")"
-            );
-            if (
-              await copyBtn.isVisible({ timeout: 5000 }).catch(() => false)
-            ) {
+            const copyBtn = page.locator("button:has-text(\"Copy public link\")");
+            if (await copyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
               await copyBtn.click();
-              await page.waitForTimeout(3000);
+              await page.waitForTimeout(2000);
             }
           }
 
-          // Step 4: Try reading the URL input again after copy
+          // Check URL again after copy
           if (!shareableUrl.includes("id=")) {
-            const urlInput2 = page.locator("input[readonly]").first();
-            if (
-              await urlInput2.isVisible({ timeout: 2000 }).catch(() => false)
-            ) {
-              const val = await urlInput2.inputValue();
+            const inp2 = page.locator("input[readonly]").first();
+            if (await inp2.isVisible({ timeout: 2000 }).catch(() => false)) {
+              const val = await inp2.inputValue();
               if (val.includes("id=")) shareableUrl = val;
             }
           }
 
-          // Step 5: Wait for the page URL to update with ?id=
+          // Wait for URL to update
           if (!shareableUrl.includes("id=")) {
             try {
-              await page.waitForFunction(
-                () => window.location.href.includes("id="),
-                { timeout: 5000 }
-              );
+              await page.waitForFunction(() => window.location.href.includes("id="), { timeout: 5000 });
               shareableUrl = page.url();
-            } catch {
-              // URL didn't update
-            }
+            } catch {}
           }
 
-          // Step 6: Fallback — thorough DOM search
+          // Fallback DOM search
           if (!shareableUrl.includes("id=")) {
             const found = await page.evaluate(() => {
-              const isValidUrl = (s: string) =>
-                s.includes("calculator.aws") || s.startsWith("http");
-              for (const el of document.querySelectorAll("input, textarea")) {
+              for (const el of document.querySelectorAll("input")) {
                 const v = (el as HTMLInputElement).value || "";
-                if (v.includes("id=") && isValidUrl(v)) return v;
-              }
-              for (const el of document.querySelectorAll("*")) {
-                if (el.children.length === 0) {
-                  const t = (el as HTMLElement).innerText || "";
-                  if (t.includes("id=") && isValidUrl(t)) return t.trim();
-                }
+                if (v.includes("id=")) return v;
               }
               return "";
             }).catch(() => "");
             if (found) shareableUrl = found;
           }
 
-          // Step 7: Fallback — clipboard
-          if (!shareableUrl.includes("id=")) {
-            try {
-              const clip = await page.evaluate(() =>
-                navigator.clipboard.readText().catch(() => "")
-              );
-              if (clip && clip.includes("id=")) shareableUrl = clip;
-            } catch {
-              // clipboard read failed
-            }
-          }
-
-          // Close the share dialog
-          const closeBtn = page
-            .locator(
-              "button[aria-label=\"Close\"], button:has-text(\"Close\"), [aria-label=\"Close\"]"
-            )
-            .first();
-          if (
-            await closeBtn.isVisible({ timeout: 3000 }).catch(() => false)
-          ) {
-            await closeBtn.click();
-          }
+          // Close dialog
+          try {
+            await page.locator("button[aria-label=\"Close\"]").first().click({ timeout: 3000 });
+          } catch {}
         } catch {
-          // Share button not found or not clickable
+          // Share failed - return current URL anyway
         }
       }
+
+      console.error(`[aws_calculator] Final URL has id: ${shareableUrl.includes("id=")}`);
+      console.error(`[aws_calculator] Final URL: ${shareableUrl.slice(0, 120)}`);
 
       return {
         success: true,
@@ -431,6 +514,10 @@ export const awsCalculatorTool = tool({
       };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      try {
+        await page.screenshot({ path: "/tmp/aws-calculator-error.png", fullPage: true });
+        console.error(`[aws_calculator] Screenshot saved to /tmp/aws-calculator-error.png`);
+      } catch { /* ignore screenshot failure */ }
       return {
         success: false,
         url: page.url(),

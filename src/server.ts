@@ -7,10 +7,10 @@ import Busboy from "busboy";
 import type { Readable } from "node:stream";
 
 const provider = process.env.OPENAI_BASE_URL
-  ? createOpenAI({ baseURL: process.env.OPENAI_BASE_URL })
-  : createOpenAI();
+  ? createOpenAI({ baseURL: process.env.OPENAI_BASE_URL, maxRetries: 0 })
+  : createOpenAI({ maxRetries: 0 });
 
-import { awsCalculatorTool } from "./tools/aws-calculator.js";
+import { awsCalculatorTool } from "./tools/aws-calculator/index.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MODEL = process.env.MODEL ?? "gpt-4o-mini";
@@ -329,6 +329,10 @@ export async function main() {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[server] error:`, msg);
+        console.error(`[server] error details:`, JSON.stringify(err, [
+          "name", "message", "stack", "statusCode", "statusText",
+          "responseBody", "url", "requestBody", "responseHeaders",
+        ], 2));
         sendJson(res, 500, { success: false, error: msg });
       }
       return;

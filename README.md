@@ -34,16 +34,30 @@ A TypeScript ReAct agent using the **Vercel AI SDK** with tools for web search, 
 
 ```
 src/
-├── index.ts                 # CLI entry — ReAct loop + chat UI
-├── server.ts                # HTTP server — POST /api/estimate
+├── index.ts                      # CLI entry — ReAct loop + chat UI
+├── server.ts                     # HTTP server — POST /api/estimate
 ├── tools/
-│   ├── search.ts            # Web search via Tavily
-│   ├── browser.ts           # Playwright page renderer
-│   ├── document.ts          # Fetch-based document reader
-│   └── aws-calculator.ts    # AWS Pricing Calculator automation
+│   ├── search.ts                 # Web search via Tavily
+│   ├── browser.ts                # Playwright page renderer
+│   ├── document.ts               # Fetch-based document reader
+│   └── aws-calculator/           # AWS Pricing Calculator automation
+│       ├── index.ts              # Tool definition, orchestration, configurator registry
+│       ├── browser.ts            # Playwright launch + overlay dismissal
+│       ├── add-service.ts        # Find/click service cards, fill fields
+│       ├── save-service.ts       # "Save and add service" / "Save and view summary"
+│       ├── share-flow.ts         # Extract shareable estimate URL
+│       ├── name-map.ts           # Short names → AWS data-cy attribute mapping
+│       └── configure-services/   # Per-service configurators (registry pattern)
+│           ├── index.ts          # Configurator registry
+│           ├── ec2.ts            # EC2-specific configuration
+│           ├── rds.ts            # RDS-specific configuration
+│           └── s3.ts             # S3-specific configuration
 prompts/
 └── system.ts                # System prompt for the agent
 AGENTS.md                    # OpenCode agent instructions
+Dockerfile                   # Docker image definition
+.dockerignore                # Files excluded from Docker build
+docker-guide.md              # Docker fundamentals for beginners
 .env                         # Environment variables
 package.json
 tsconfig.json
@@ -169,19 +183,23 @@ The server listens on `$PORT` (default 3000).
 
 ### Docker
 
-```dockerfile
-FROM node:22-slim
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci && npx playwright install chromium
-COPY . .
-EXPOSE 3000
-CMD ["node", "--import", "tsx", "src/server.ts"]
+Build and run with the included [`Dockerfile`](./Dockerfile):
+
+```bash
+# Build the image (installs Chromium + system deps automatically)
+docker build -t react-agent .
+
+# Run the server (pass .env for API keys)
+docker run -p 3000:3000 --env-file .env react-agent
 ```
+
+The Dockerfile installs both Playwright's Chromium and its system libraries (`npx playwright install-deps`). `.env` is excluded via `.dockerignore` — secrets stay out of the image.
+
+For a beginner-friendly explanation of Docker concepts and commands, see [`docker-guide.md`](./docker-guide.md).
 
 ### Fly.io / Railway / Render
 
-Set the start command to `npm run server`, set your environment variables, and ensure the build step runs `npx playwright install chromium`.
+Set the build command to `npx playwright install chromium && npx playwright install-deps chromium` and the start command to `npm run server`. Set environment variables via the platform dashboard.
 
 ## How It Works
 
@@ -212,15 +230,17 @@ Each tool wraps a concrete action:
 
 ### AWS Calculator Flow
 
-1. Launch headless Chromium via Playwright
-2. Navigate to `https://calculator.aws/#/estimate`
-3. Dismiss cookie banner and chatbot overlay
-4. Click "Add service", find the service by `data-cy` attribute
-5. Click "Configure", fill quantity, save
-6. Click "Share" → "Agree and continue" → extract shareable URL
-7. Return the URL with the estimate ID
+1. **Launch** headless Chromium via Playwright (`src/tools/aws-calculator/browser.ts`)
+2. **Navigate** to `https://calculator.aws/#/estimate`
+3. **Dismiss** cookie banner and chatbot overlay
+4. **For each service:**
+   - Click "Add service", find the correct card by `data-cy` attribute (`add-service.ts`)
+   - Click "Configure", run the service-specific configurator if one exists (`configure-services/`)
+   - Fill quantity, click "Save and add service" (`save-service.ts`)
+5. **Extract URL** via "Share" → "Agree and continue" → capture estimate ID (`share-flow.ts`)
+6. **Return** the shareable estimate URL
 
-## Adding a New Tool (e.g. `azure_calculator`)
+## Adding a New Tool
 
 ### 1. Create the tool file
 
@@ -232,26 +252,15 @@ import { z } from "zod";
 export const azureCalculatorTool = tool({
   description: `Navigate the Azure Pricing Calculator and return a shareable estimate URL.`,
   parameters: z.object({
-    services: z
-      .array(
-        z.object({
-          serviceName: z.string().describe("Full Azure service name e.g. 'Virtual Machines'"),
-          quantity: z.number().optional().default(1),
-          description: z.string().optional(),
-        })
-      )
-      .min(1),
+    services: z.array(z.object({
+      serviceName: z.string(),
+      quantity: z.number().optional().default(1),
+    })).min(1),
     region: z.string().optional().default("East US"),
-    title: z.string().optional().default("Architecture Estimate"),
   }),
-  execute: async ({ services, region, title }) => {
-    // Your Playwright automation here
-    return {
-      success: true,
-      url: "https://...",
-      services: services.map(s => s.serviceName),
-      message: `Estimate created.`,
-    };
+  execute: async ({ services }) => {
+    // Playwright automation here
+    return { success: true, url: "https://...", services: services.map(s => s.serviceName), message: "Done" };
   },
 });
 ```
@@ -267,7 +276,7 @@ const tools = {
   browse: browseTool,
   read_document: readDocumentTool,
   aws_calculator: awsCalculatorTool,
-  azure_calculator: azureCalculatorTool,  // ← add here
+  azure_calculator: azureCalculatorTool,  // ← add
 };
 ```
 
@@ -280,32 +289,17 @@ import { azureCalculatorTool } from "./tools/azure-calculator.js";
 const tools = {
   search: searchTool,
   aws_calculator: awsCalculatorTool,
-  azure_calculator: azureCalculatorTool,  // ← add here
+  azure_calculator: azureCalculatorTool,  // ← add
 };
 ```
 
 ### 4. Update the system prompt
 
-```typescript
-// prompts/system.ts
-// Add the tool description to the system prompt
-- **azure_calculator**: navigate the Azure Pricing Calculator...
-```
+Add the tool description in `prompts/system.ts`.
 
 ### 5. Update AGENTS.md
 
 Document the tool so OpenCode knows when to use it.
-
-### 6. (Optional) Add a server endpoint
-
-If the tool needs a dedicated API endpoint (like `/api/estimate` for AWS):
-
-```typescript
-// src/server.ts
-if (req.method === "POST" && req.url === "/api/azure-estimate") {
-  // handle Azure estimate request
-}
-```
 
 ## Configuration Reference
 

@@ -11,7 +11,7 @@ const provider = process.env.OPENAI_BASE_URL
 import { searchTool } from "./tools/search.js";
 import { browseTool } from "./tools/browser.js";
 import { readDocumentTool } from "./tools/document.js";
-import { awsCalculatorTool } from "./tools/aws-calculator.js";
+import { awsCalculatorTool } from "./tools/aws-calculator/index.js";
 import { SYSTEM_PROMPT } from "../prompts/system.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────

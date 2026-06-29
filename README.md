@@ -57,7 +57,6 @@ prompts/
 AGENTS.md                    # OpenCode agent instructions
 Dockerfile                   # Docker image definition
 .dockerignore                # Files excluded from Docker build
-docker-guide.md              # Docker fundamentals for beginners
 .env                         # Environment variables
 package.json
 tsconfig.json
@@ -65,7 +64,7 @@ tsconfig.json
 
 ## Requirements
 
-- Node.js 20+
+- [Bun](https://bun.sh) 1.x
 - [Tavily API key](https://tavily.com) (free tier available)
 - OpenAI API key (or OpenRouter for any model)
 
@@ -74,8 +73,8 @@ tsconfig.json
 ```bash
 git clone <repo>
 cd react-agent
-npm install
-npx playwright install chromium
+bun install
+bunx playwright install chromium
 cp .env.example .env
 # Edit .env with your API keys
 ```
@@ -105,10 +104,10 @@ PORT=3000                       # Server port (default 3000)
 
 ```bash
 # Development (watch mode)
-npm run dev
+bun run dev
 
 # Production
-npm start
+bun start
 ```
 
 Type your questions and watch the agent reason step by step, calling tools as needed.
@@ -117,10 +116,10 @@ Type your questions and watch the agent reason step by step, calling tools as ne
 
 ```bash
 # Development (watch mode)
-npm run server:dev
+bun run server:dev
 
 # Production
-npm run server
+bun run server
 ```
 
 #### POST /api/estimate
@@ -171,12 +170,12 @@ Creates an AWS cost estimate from an architecture description.
 
 ## Deploy
 
-### Node.js (any host)
+### Node.js / Bun (any host)
 
 ```bash
-npm ci --production
-npx playwright install chromium
-npm run server
+bun install --production
+bunx playwright install chromium
+bun run server
 ```
 
 The server listens on `$PORT` (default 3000).
@@ -193,13 +192,11 @@ docker build -t react-agent .
 docker run -p 3000:3000 --env-file .env react-agent
 ```
 
-The Dockerfile installs both Playwright's Chromium and its system libraries (`npx playwright install-deps`). `.env` is excluded via `.dockerignore` — secrets stay out of the image.
-
-For a beginner-friendly explanation of Docker concepts and commands, see [`docker-guide.md`](./docker-guide.md).
+The Dockerfile installs both Playwright's Chromium and its system libraries. `.env` is excluded via `.dockerignore` — secrets stay out of the image.
 
 ### Fly.io / Railway / Render
 
-Set the build command to `npx playwright install chromium && npx playwright install-deps chromium` and the start command to `npm run server`. Set environment variables via the platform dashboard.
+Set the build command to `bunx playwright install chromium && bunx playwright install-deps chromium` and the start command to `bun run server`. Set environment variables via the platform dashboard.
 
 ## How It Works
 

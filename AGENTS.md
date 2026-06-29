@@ -4,7 +4,7 @@ TypeScript ReAct agent using Vercel AI SDK.
 
 ## Stack
 
-- Node.js
+- Bun
 - TypeScript
 - Vercel AI SDK
 - OpenCode
@@ -34,8 +34,8 @@ Navigate the AWS Pricing Calculator, add the specified services, and return a sh
 The project includes an HTTP server for creating estimates programmatically.
 
 ```bash
-npm run server        # Start API server (production)
-npm run server:dev    # Start API server (watch mode)
+bun run server        # Start API server (production)
+bun run server:dev    # Start API server (watch mode)
 ```
 
 ### POST /api/estimate
@@ -75,11 +75,11 @@ For PDF uploads, the server extracts the text using `pdf-parse` and passes it to
 ## Commands
 
 ```bash
-npm run dev                 # CLI agent (watch mode)
-npm start                   # CLI agent
-npm run server              # API server (production)
-npm run server:dev          # API server (watch mode)
-npx playwright install chromium
+bun run dev                 # CLI agent (watch mode)
+bun start                   # CLI agent
+bun run server              # API server (production)
+bun run server:dev          # API server (watch mode)
+bunx playwright install chromium
 ```
 
 ## Process to add a new tool

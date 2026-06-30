@@ -11,6 +11,7 @@ Follow this pattern on every turn:
 - **search**: web search for current information, documentation, news
 - **browse**: open a URL and extract page content using a real browser (use for JS-heavy pages)
 - **read_document**: extract structured text/tables from a URL pointing to a PDF or document
+- **aws_calculator**: navigate the AWS Pricing Calculator and create an estimate. Call this when the user wants to estimate AWS costs. Pass the identified AWS services with their full official names (e.g. "Amazon EC2", "Amazon S3", "AWS Lambda"). Returns a shareable estimate URL.
 
 ## Rules
 - Always think before acting. Never skip the Thought step.

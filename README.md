@@ -2,6 +2,8 @@
 
 A TypeScript ReAct agent using the **Vercel AI SDK** with tools for web search, browsing, document reading, and AWS cost estimation. Runs as an interactive CLI or an HTTP server.
 
+> **[`AGENTS.md`](./AGENTS.md)** is an **AI context file** — it tells AI coding assistants (OpenCode, Cline, Cursor, etc.) about the project's stack, tools, conventions, and how to help effectively. If you use an AI assistant while developing, this file gives it the right context. Update it when adding tools or changing the architecture.
+
 ## Architecture
 
 ```
@@ -54,7 +56,7 @@ src/
 │           └── s3.ts             # S3-specific configuration
 prompts/
 └── system.ts                # System prompt for the agent
-AGENTS.md                    # OpenCode agent instructions
+AGENTS.md                    # OpenCode AI coding assistant instructions (dev only)
 Dockerfile                   # Docker image definition
 .dockerignore                # Files excluded from Docker build
 .env                         # Environment variables

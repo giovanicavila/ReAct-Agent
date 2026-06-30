@@ -182,17 +182,23 @@ The server listens on `$PORT` (default 3000).
 
 ### Docker
 
-Build and run with the included [`Dockerfile`](./Dockerfile):
+The included [`Dockerfile`](./Dockerfile) bundles Bun, Chromium, and all system dependencies.
 
 ```bash
-# Build the image (installs Chromium + system deps automatically)
+# Build
 docker build -t react-agent .
 
-# Run the server (pass .env for API keys)
+# Run the HTTP server (default) — pass API keys via .env
 docker run -p 3000:3000 --env-file .env react-agent
+
+# Run the interactive CLI instead
+docker run -it --env-file .env react-agent bun run src/index.ts
+
+# Run the CLI in dev mode (watch) — note: --env-file still needed
+docker run -it --env-file .env react-agent bun run dev
 ```
 
-The Dockerfile installs both Playwright's Chromium and its system libraries. `.env` is excluded via `.dockerignore` — secrets stay out of the image.
+The Dockerfile installs Playwright's Chromium and system libraries at build time. `.env` is excluded via `.dockerignore` — secrets stay out of the image. For local development, the `.env` file at the project root is used instead.
 
 ### Fly.io / Railway / Render
 

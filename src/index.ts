@@ -12,31 +12,46 @@ import { searchTool } from "./tools/search.js";
 import { browseTool } from "./tools/browser.js";
 import { readDocumentTool } from "./tools/document.js";
 import { awsCalculatorTool } from "./tools/aws-calculator/index.js";
+import { getMcpTools } from "./tools/aws-calculator-mcp/index.js";
 import { SYSTEM_PROMPT } from "../prompts/system.js";
-
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type Message = { role: "user" | "assistant"; content: string };
 
 // ── Agent config ─────────────────────────────────────────────────────────────
 
-const MODEL = process.env.MODEL ?? "gpt-4o-mini";
+const MODEL = process.env.MODEL;
+if (!MODEL) throw new Error("MODEL environment variable is required");
 const MAX_STEPS = Number(process.env.MAX_STEPS ?? 5);
 
 const model = provider(MODEL);
 
-const tools = {
+const BASE_TOOLS = {
   search: searchTool,
   browse: browseTool,
   read_document: readDocumentTool,
   aws_calculator: awsCalculatorTool,
 };
 
+let tools: Record<string, unknown> = BASE_TOOLS;
+
+async function ensureMcpTools() {
+  if (tools !== BASE_TOOLS) return;
+  try {
+    const mcpTools = await getMcpTools();
+    tools = { ...BASE_TOOLS, ...mcpTools };
+    console.log("  AWS Pricing Calculator MCP tools ready");
+  } catch (err) {
+    console.warn("  AWS MCP tools unavailable (run `npx -y sample-aws-pricing-calculator-mcp@latest` to test):", (err as Error).message);
+  }
+}
+
 // ── Core: single agent turn ───────────────────────────────────────────────────
 
 async function runAgent(
   userMessage: string,
-  history: Message[] = []
+  history: Message[] = [],
+  agentTools: Record<string, unknown> = tools
 ): Promise<string> {
   const messages: Message[] = [
     ...history,
@@ -47,11 +62,10 @@ async function runAgent(
     model,
     system: SYSTEM_PROMPT,
     messages,
-    tools,
+    tools: agentTools as any,
     maxSteps: MAX_STEPS,
     maxTokens: Number(process.env.MAX_TOKENS ?? 1024),
-    onStepFinish({ stepType, toolCalls, toolResults, text }) {
-      // Pretty-print each step so you can watch the reasoning
+    onStepFinish({ stepType, toolCalls, toolResults, text }: any) {
       if (stepType === "tool-result") {
         for (const call of toolCalls ?? []) {
           console.log(
@@ -59,8 +73,8 @@ async function runAgent(
             JSON.stringify(call.args, null, 2)
           );
         }
-        for (const result of toolResults ?? []) {
-          const preview = JSON.stringify(result.result).slice(0, 300);
+        for (const tr of toolResults ?? []) {
+          const preview = JSON.stringify(tr.result).slice(0, 300);
           console.log(`📥 result preview: ${preview}…`);
         }
       }
@@ -76,6 +90,8 @@ async function runAgent(
 // ── CLI chat loop ─────────────────────────────────────────────────────────────
 
 async function main() {
+  console.log("🤖 ReAct Agent initializing…");
+  await ensureMcpTools();
   console.log("🤖 ReAct Agent ready. Type your question (ctrl+c to quit)\n");
 
   const rl = readline.createInterface({ input, output });
@@ -105,7 +121,9 @@ async function main() {
 
 if (process.argv.includes("--server")) {
   // Start HTTP server instead of CLI
-  const { main: serverMain } = await import("./server.js");
+  console.log("🤖 ReAct Agent initializing…");
+  await ensureMcpTools();
+  const { main: serverMain } = await import("./server/index.js");
   serverMain();
 } else {
   main();

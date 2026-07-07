@@ -2,19 +2,14 @@ import "dotenv/config";
 import Fastify, { type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
-import { createOpenAI } from "@ai-sdk/openai";
 import type { IncomingMessage } from "node:http";
 import { extractPdfText } from "./utils/pdf.js";
 import { estimateHandler, estimateHandlerFromPdf } from "./handlers/estimate.js";
 
-const provider = process.env.OPENAI_BASE_URL
-  ? createOpenAI({ baseURL: process.env.OPENAI_BASE_URL } as any)
-  : createOpenAI({} as any);
+if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY environment variable is required");
+if (!process.env.MODEL) throw new Error("MODEL environment variable is required");
 
 const PORT = Number(process.env.PORT ?? 3000);
-const MODEL = process.env.MODEL;
-if (!MODEL) throw new Error("MODEL environment variable is required");
-const model = provider(MODEL);
 
 export async function main() {
   const app = Fastify({ logger: false });
@@ -47,6 +42,29 @@ export async function main() {
 
   app.get("/health", async () => ({ status: "ok" }));
 
+  app.get("/api/test-llm", async (req, reply) => {
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: process.env.MODEL,
+          messages: [{ role: "user", content: "Say hello in one word" }],
+          max_tokens: 50,
+        }),
+      });
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content ?? "";
+      return reply.send({ success: true, content, contentLength: content.length });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.status(500).send({ success: false, error: msg });
+    }
+  });
+
   app.post("/api/estimate", async (req, reply) => {
     try {
       const ct = req.headers["content-type"] ?? "";
@@ -61,7 +79,7 @@ export async function main() {
         const buffer = await file.toBuffer();
         const pdfText = await extractPdfText(buffer);
         console.log(`[server] extracted ${pdfText.length} chars from PDF`);
-        const data = await estimateHandlerFromPdf(pdfText, model);
+        const data = await estimateHandlerFromPdf(pdfText);
         return reply.send(data);
       }
 
@@ -70,14 +88,14 @@ export async function main() {
         console.log(`[server] received PDF upload (raw)`);
         const pdfText = await extractPdfText(req.body as Buffer);
         console.log(`[server] extracted ${pdfText.length} chars from PDF`);
-        const data = await estimateHandlerFromPdf(pdfText, model);
+        const data = await estimateHandlerFromPdf(pdfText);
         return reply.send(data);
       }
 
       // JSON or plain text
       const body = req.body as string | Record<string, unknown> | unknown[];
       console.log(`[server] received payload`);
-      const data = await estimateHandler(body, model);
+      const data = await estimateHandler(body);
       return reply.send(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

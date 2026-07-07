@@ -38,10 +38,15 @@ export async function findAndClickServiceCard(page: Page, serviceName: string): 
 }
 
 export async function ensureOnAddServicePage(page: Page) {
-  if (page.url().includes("/addService")) return;
+  const url = page.url();
+  if (url.includes("/addService")) return;
+
   const addBtn = page.locator("button:has-text(\"Add service\")").first();
   if (await addBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
     await addBtn.click();
+    await page.waitForTimeout(3000);
+  } else if (url.includes("/createCalculator/")) {
+    await page.evaluate(() => { window.location.hash = "#/addService"; });
     await page.waitForTimeout(3000);
   } else {
     await navigateToAddService(page);

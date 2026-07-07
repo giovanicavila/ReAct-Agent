@@ -1,5 +1,40 @@
-import { generateText, type LanguageModelV1 } from "ai";
 import { awsCalculatorTool } from "../../tools/aws-calculator/index.js";
+
+const API_BASE = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+
+async function callLLM(system: string, userMessage: string, maxTokens: number): Promise<string> {
+  const model = process.env.MODEL || "gpt-4o-mini";
+  const body = {
+    model,
+    messages: [
+      { role: "user", content: `${system}\n\n${userMessage}` },
+    ],
+    max_tokens: maxTokens,
+  };
+
+  const response = await fetch(`${API_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "unknown");
+    throw new Error(`OpenRouter API error ${response.status}: ${errText.slice(0, 300)}`);
+  }
+
+  const data = await response.json() as any;
+  const content = data?.choices?.[0]?.message?.content;
+  if (content) {
+    console.log(`[server] LLM response OK, length: ${content.length}`);
+  } else {
+    console.log(`[server] LLM response EMPTY or ERROR. Full data:`, JSON.stringify(data).slice(0, 1000));
+  }
+  return content ?? "";
+}
 
 const EXTRACT_PROMPT = `You are an AWS Solutions Architect. Analyze an architecture description and output a comprehensive list of AWS services needed.
 
@@ -52,8 +87,14 @@ function defaultServices(raw: any[]): ServiceEntry[] {
 }
 
 function extractServices(jsonStr: string): any[] | null {
-  const match = jsonStr.match(/```json\s*([\s\S]*?)\s*```/);
-  const raw = match ? match[1] : jsonStr.trim();
+  let raw = jsonStr.trim();
+  const openIdx = raw.indexOf("```json");
+  const closeIdx = raw.lastIndexOf("```");
+  if (openIdx !== -1) {
+    const start = openIdx + 7;
+    const end = closeIdx > openIdx ? closeIdx : raw.length;
+    raw = raw.slice(start, end).trim();
+  }
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : null;
@@ -101,18 +142,22 @@ function generateSummary(services: { name: string; quantity: number; added: bool
   return parts.join(" ");
 }
 
-async function extractServicesFromLLM(architecture: string, model: LanguageModelV1) {
-  const result = await generateText({
-    model,
-    system: EXTRACT_PROMPT,
-    messages: [{ role: "user", content: architecture }],
-    maxTokens: Number(process.env.MAX_TOKENS ?? 4096),
-  });
+async function extractServicesFromLLM(architecture: string) {
+  const maxTokens = Number(process.env.MAX_TOKENS ?? 4096);
+  console.log(`[server] LLM extract call — maxTokens: ${maxTokens}, architecture length: ${architecture.length}`);
+  const raw = await callLLM(EXTRACT_PROMPT, architecture, maxTokens);
+  console.log(`[server] LLM extract response length: ${raw.length}`);
 
-  const extracted = extractServices(result.text);
+  if (!raw.trim()) {
+    return {
+      error: "LLM returned empty response. The model may be overloaded or the input is too long.",
+    };
+  }
+
+  const extracted = extractServices(raw);
   if (!extracted) {
     return {
-      error: `Failed to parse service list. Raw: ${result.text.slice(0, 500)}`,
+      error: `Failed to parse service list. Raw (${raw.length} chars): ${raw.slice(0, 300)}`,
     };
   }
   return { services: defaultServices(extracted), raw: extracted };
@@ -121,28 +166,27 @@ async function extractServicesFromLLM(architecture: string, model: LanguageModel
 async function enrichServices(
   services: any[],
   architecture: string,
-  model: LanguageModelV1,
 ): Promise<{ serviceName: string; reasoning?: string; usage?: string }[]> {
   const serviceNames = services.map((s) => s.serviceName).join(", ");
-  const result = await generateText({
-    model,
-    system: ENRICH_PROMPT,
-    messages: [{
-      role: "user",
-      content: `Architecture: ${architecture.slice(0, 1000)}\n\nExplain these services: ${serviceNames}`,
-    }],
-    maxTokens: Number(process.env.MAX_TOKENS ?? 4096),
-  });
+  const userMessage = `Architecture: ${architecture.slice(0, 1000)}\n\nExplain these services: ${serviceNames}`;
+  const raw = await callLLM(ENRICH_PROMPT, userMessage, Number(process.env.MAX_TOKENS ?? 4096));
+  console.log(`[server] LLM enrich response length: ${raw.length}`);
 
-  const enriched = extractServices(result.text);
+  if (!raw.trim()) {
+    console.warn("[server] enrich returned empty, skipping explanations");
+    return [];
+  }
+
+  const enriched = extractServices(raw);
   if (!enriched) return [];
   return enriched;
 }
 
 export async function estimateHandler(
   body: string | Record<string, unknown> | unknown[],
-  model: LanguageModelV1,
 ): Promise<object> {
+  console.log(`[server] estimateHandler body type: ${typeof body}, isArray: ${Array.isArray(body)}`);
+
   let architecture: string;
   let services: ServiceEntry[] | null = null;
 
@@ -157,6 +201,8 @@ export async function estimateHandler(
     }
     architecture = typeof body.architecture === "string" ? body.architecture : JSON.stringify(body);
   }
+
+  console.log(`[server] architecture length: ${architecture.length}, services pre-defined: ${services?.length ?? 0}`);
 
   if (services && services.length > 0) {
     const toolResult = await awsCalculatorTool.execute({
@@ -173,7 +219,7 @@ export async function estimateHandler(
   }
 
   // Step 1: extract services from LLM
-  const extracted = await extractServicesFromLLM(architecture, model);
+  const extracted = await extractServicesFromLLM(architecture);
   if ("error" in extracted) {
     return { success: false, url: null, services: [], message: extracted.error, error: "JSON parse error" };
   }
@@ -184,7 +230,7 @@ export async function estimateHandler(
   console.log(`[server] extracted ${extracted.services.length} services from LLM`);
 
   // Step 2: enrich with reasoning/usage
-  const enriched = await enrichServices(extracted.raw, architecture, model);
+  const enriched = await enrichServices(extracted.raw, architecture);
   console.log(`[server] enriched ${enriched.length} services with explanations`);
 
   // Step 3: merge enrichments into a map keyed by serviceName
@@ -220,11 +266,11 @@ export async function estimateHandler(
   return buildResponse(toolResult, enrichedMap, summary);
 }
 
-export async function estimateHandlerFromPdf(pdfText: string, model: LanguageModelV1): Promise<object> {
+export async function estimateHandlerFromPdf(pdfText: string): Promise<object> {
   const architecture = `The following architecture description was extracted from a PDF document. Identify the AWS services needed and create an estimate.\n\n${pdfText}`;
 
   // Step 1: extract services
-  const extracted = await extractServicesFromLLM(architecture, model);
+  const extracted = await extractServicesFromLLM(architecture);
   if ("error" in extracted) {
     return { success: false, url: null, services: [], message: extracted.error, error: "JSON parse error" };
   }
@@ -235,7 +281,7 @@ export async function estimateHandlerFromPdf(pdfText: string, model: LanguageMod
   console.log(`[server] extracted ${extracted.services.length} services from LLM`);
 
   // Step 2: enrich
-  const enriched = await enrichServices(extracted.raw, architecture, model);
+  const enriched = await enrichServices(extracted.raw, architecture);
   console.log(`[server] enriched ${enriched.length} services with explanations`);
 
   const enrichedMap = new Map<string, ServiceExplanation>();

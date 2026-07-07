@@ -37,12 +37,22 @@ Creates an AWS cost estimate from an architecture description. Accepts these for
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `architecture` | `string \| object` | optional* | Free-text description or structured JSON of your architecture |
+| `architecture` | `string` | optional* | Free-text architecture description |
+| `workloadType` | `string` | no | e.g. `"Web Application"`, `"Microservices"` |
+| `monthlyActiveUsers` | `number` | no | Expected monthly active users |
+| `peakConcurrentUsers` | `number` | no | Expected peak concurrent users |
+| `requestsPerDay` | `number` | no | Estimated daily API requests |
+| `storageGB` | `number` | no | Initial storage needed (GB) |
+| `monthlyStorageGrowthGB` | `number` | no | Monthly storage growth (GB) |
+| `databaseSizeGB` | `number` | no | Estimated database size (GB) |
+| `outboundTrafficGBPerMonth` | `number` | no | Monthly outbound data transfer (GB) |
+| `availabilityTier` | `string` | no | `"Standard"`, `"High"`, `"Production"` |
+| `trafficPattern` | `string` | no | `"Steady"`, `"Variable"`, `"Spiky"` |
 | `services` | `Service[]` | optional* | Pre-defined service list (skips LLM extraction) |
 | `file` (multipart) | PDF | optional* | Upload a PDF containing the architecture description |
 | Raw body (PDF) | `application/pdf` | optional* | Send PDF bytes directly |
 
-`*` — exactly one input format must be provided.
+`*` — exactly one input format must be provided. Structured metadata fields are passed to the LLM as context for better service selection.
 
 ### Service object
 
@@ -53,12 +63,24 @@ Creates an AWS cost estimate from an architecture description. Accepts these for
 ### Examples
 
 ```bash
-# Text description
+# Structured architecture (recommended — includes workload metadata)
 curl -X POST http://localhost:3000/api/estimate \
   -H "Content-Type: application/json" \
-  -d '{"architecture": "Web app with EC2, RDS PostgreSQL, S3, and a load balancer"}'
+  -d '{
+    "workloadType": "Web Application",
+    "monthlyActiveUsers": 5000,
+    "peakConcurrentUsers": 100,
+    "requestsPerDay": 20000,
+    "storageGB": 50,
+    "monthlyStorageGrowthGB": 5,
+    "databaseSizeGB": 20,
+    "outboundTrafficGBPerMonth": 100,
+    "availabilityTier": "Standard",
+    "trafficPattern": "Steady",
+    "architecture": "Uma pequena aplicação web para gerenciamento de tarefas. Os usuários podem criar contas, fazer login, cadastrar tarefas e visualizar relatórios simples. A aplicação possui uma API REST, um banco de dados relacional e armazenamento de arquivos para anexos. O objetivo é ter uma arquitetura de baixo custo, fácil de manter e escalável caso o número de usuários cresça."
+  }'
 
-# Pre-defined services
+# Pre-defined services (skips LLM extraction)
 curl -X POST http://localhost:3000/api/estimate \
   -H "Content-Type: application/json" \
   -d '{"services": [{"serviceName":"Amazon EC2","quantity":3}]}'
